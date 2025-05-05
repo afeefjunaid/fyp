@@ -1,0 +1,301 @@
+import os
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, random_split
+from tqdm import tqdm
+import pandas as pd
+import numpy as np
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, root_mean_squared_error
+from torch_optimizer import Lamb  
+import clip
+from torch.optim import AdamW
+from torch.optim import SGD
+from pytorch_lamb import Lamb
+from torch_optimizer import RAdam
+
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using device: {device}")
+
+
+
+batch_sizes = [16]
+#[4,8,16,32,64]
+learning_rates = [0.001]
+#[0.1,0.01,0.001,0.0001,0.00001]
+optimizers_list = ['LAMB', 'RAdam']
+#['LAMB', 'AdamW', 'SGD', 'RAdam']
+num_classes=3
+total_epochs = 501
+start=100
+step=5
+
+
+
+clip_model, _ = clip.load("ViT-B/32", device=device)
+
+
+#without augmentataion
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize((0.48145466, 0.4578275, 0.40821073),
+                         (0.26862954, 0.26130258, 0.27577711))
+])
+
+#with augmentaion
+# aug_transform = transforms.Compose([
+#     transforms.RandomHorizontalFlip(p=0.8),
+#     transforms.RandomVerticalFlip(p=0.8),
+#     transforms.RandomRotation(45),     
+#     transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+#     #transforms.RandomResizedCrop(224, scale=(0.8, 1.0), ratio=(0.75, 1.25)),  
+#     transforms.Resize((224, 224)),
+#     transforms.ToTensor(),
+#     transforms.Normalize((0.48145466, 0.4578275, 0.40821073),
+#                          (0.26862954, 0.26130258, 0.27577711))
+# ])
+
+data_dir = "../Preprocessing/stage3patches"
+dataset = datasets.ImageFolder(root=data_dir, transform=transform)
+print("Classes:", dataset.classes)
+
+
+
+train_size = int(0.7 * len(dataset))
+val_size = int(0.2 * len(dataset))
+test_size = len(dataset) - train_size - val_size
+train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
+
+# train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+# val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+# test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+
+#you have frozen the entire CLIP visual encoder:
+# for param in clip_model.visual.parameters():
+#     param.requires_grad = False
+
+#unfreze all layers
+for param in model.parameters():
+    param.requires_grad = True
+
+#unfreeze last 4 layers:
+# for name, param in clip_model.visual.named_parameters():
+#     if "transformer.resblocks.8" in name or \
+#        "transformer.resblocks.9" in name or \
+#        "transformer.resblocks.10" in name or \
+#        "transformer.resblocks.11" in name:
+#         param.requires_grad = True
+#     else:
+#         param.requires_grad = False
+
+
+# class CLIPSkinClassifier(nn.Module):
+#     def __init__(self, clip_model, num_classes=3):
+#         super(CLIPSkinClassifier, self).__init__()
+#         self.encoder = clip_model.visual
+#         self.classifier = nn.Sequential(
+#             nn.Linear(self.encoder.output_dim, 128),
+#             nn.ReLU(),
+#             nn.Dropout(0.5),
+#             nn.Linear(128, num_classes)
+#         )
+        
+
+#     def forward(self, x):
+#         features = self.encoder(x)
+#         logits = self.classifier(features)
+#         return logits
+
+
+
+class CLIPSkinClassifier(nn.Module):
+    def __init__(self, clip_model, num_classes):
+        super(CLIPSkinClassifier, self).__init__()
+        self.clip_model = clip_model
+        self.fc1 = nn.Linear(clip_model.visual.output_dim, 512)  # Increased size
+        self.fc2 = nn.Linear(512, 256)  # Adjusted for more capacity
+        self.fc3 = nn.Linear(256, num_classes)
+        self.batch_norm1 = nn.BatchNorm1d(256)
+        self.batch_norm2 = nn.BatchNorm1d(128)
+        self.dropout = nn.Dropout(0.5)
+
+    def forward(self, x):
+        x = self.clip_model.encode_image(x)
+        x = torch.relu(self.fc1(x))
+        x = self.batch_norm1(x)
+        x = torch.relu(self.fc2(x))
+        x = self.batch_norm2(x)
+        x = self.dropout(x)
+        x = self.fc3(x)
+        return x
+    
+
+def get_optimizer(optimizer_name, model_params, lr,weight_decay=0.01):
+    if optimizer_name == 'AdamW':
+        return AdamW(model_params, lr=lr, weight_decay=weight_decay)
+    elif optimizer_name == 'LAMB':
+        return Lamb(model_params, lr=lr, weight_decay=weight_decay)
+    elif optimizer_name == 'SGD':
+        return SGD(model_params, lr=lr, weight_decay=weight_decay)
+    elif optimizer_name == 'RAdam':
+        return RAdam(model_params, lr=lr, weight_decay=weight_decay)
+
+
+def compute_metrics(outputs, labels):
+    preds = torch.argmax(outputs, dim=1).cpu().numpy()
+    labels = labels.cpu().numpy()
+    acc = accuracy_score(labels, preds)
+    precision = precision_score(labels, preds, average='macro', zero_division=0)
+    recall = recall_score(labels, preds, average='macro', zero_division=0)
+    f1 = f1_score(labels, preds, average='macro', zero_division=0)
+    try:
+        roc_auc = roc_auc_score(np.eye(3)[labels], F.softmax(outputs, dim=1).cpu().detach().numpy(), multi_class='ovr')
+    except:
+        roc_auc = None
+    rmse = root_mean_squared_error(labels, preds)
+    return acc, precision, recall, f1, roc_auc, rmse
+
+
+
+def train_model(model, loader, optimizer, criterion, device):
+    model.train()
+    total_loss = 0
+    all_outputs = []
+    all_labels = []
+
+    for images, labels in tqdm(loader):
+        images, labels = images.to(device).float(), labels.to(device)
+        optimizer.zero_grad()
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+        all_outputs.append(outputs.detach())
+        all_labels.append(labels)
+
+    outputs_cat = torch.cat(all_outputs)
+    labels_cat = torch.cat(all_labels)
+    acc, precision, recall, f1, roc_auc, rmse = compute_metrics(outputs_cat, labels_cat)
+    return total_loss / len(loader), acc, precision, recall, f1, roc_auc, rmse
+
+
+
+def evaluate_model(model, loader, criterion, device):
+    model.eval()
+    total_loss = 0
+    all_outputs = []
+    all_labels = []
+
+    with torch.no_grad():
+        for images, labels in tqdm(loader):
+            images, labels = images.to(device).float(), labels.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            total_loss += loss.item()
+            all_outputs.append(outputs)
+            all_labels.append(labels)
+
+    outputs_cat = torch.cat(all_outputs)
+    labels_cat = torch.cat(all_labels)
+    acc, precision, recall, f1, roc_auc, rmse = compute_metrics(outputs_cat, labels_cat)
+    return total_loss / len(loader), acc, precision, recall, f1, roc_auc, rmse
+
+
+
+
+for batch_size in batch_sizes:
+    for lr in learning_rates:
+        for optimizer_name in optimizers_list:
+            
+            model = CLIPSkinClassifier(clip_model, num_classes=num_classes).to(device).float()
+            
+            
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+            
+            test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+            
+            
+            criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+            optimizer = get_optimizer(optimizer_name,model.parameters(), lr=lr)
+            
+            
+            for epoch in range(start,total_epochs,step):
+                
+                
+                train_loss, train_acc, train_precision, train_recall, train_f1, train_roc_auc, train_rmse = train_model(model, train_loader, optimizer, criterion, device)
+                val_loss, val_acc, val_precision, val_recall, val_f1, val_roc_auc, val_rmse = evaluate_model(model, val_loader, criterion, device)
+                test_loss, test_acc, test_precision, test_recall, test_f1, test_roc_auc, test_rmse = evaluate_model(model, test_loader, criterion, device)
+
+
+                print("----------Values After Training-----------")
+                print(f"\nEpoch: [{epoch}/{total_epochs}] \nBatch Size: {batch_size} \nLearning Rate: {lr}",
+                    f"\nOptimizer: {optimizer_name}, \nTrain Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, "
+                        f"Train Precision: {train_precision:.4f}, Train Recall: {train_recall:.4f}, Train  F1: {train_f1:.4f},"
+                        f"Train ROC AUC: {train_roc_auc if train_roc_auc is not None else 'N/A'}, Train RMSE: {train_rmse:.4f}")
+
+                print("\n\n-----------Values After Validation-----------")
+                print(f"\nEpoch: [{epoch}/{total_epochs}] \nBatch Size: {batch_size} \nLearning Rate: {lr}"
+                    f"\nOptimizer: {optimizer_name}, \nVal Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}, "
+                            f"Val Precision: {val_precision:.4f}, Val Recall: {val_recall:.4f}, Val F1: {val_f1:.4f}, Val ROC AUC: {val_roc_auc if train_roc_auc is not None else 'N/A'}, "
+                            f"Val RMSE: {val_rmse:.4f}")
+
+                print("\n\n-----------Values After Testing-----------")
+                print(f"\nEpoch: [{epoch}/{total_epochs}] \nBatch Size: {batch_size} \nLearning Rate: {lr}"
+                    f"\nOptimizer: {optimizer_name}, Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}, Test Precision: {test_precision:.4f}, "
+                            f"Test Recall: {test_recall:.4f}, Test F1: {test_f1:.4f}, Test ROC AUC: {test_roc_auc if train_roc_auc is not None else 'N/A'}, Test RMSE: {test_rmse:.4f}")
+
+                
+                
+                overall_result = {
+                    'Epoch': epoch ,
+                    'Batch Size': batch_size,
+                    'Learning Rate': lr,
+                    'Optimizer': optimizer_name,
+
+                    'Train Loss': round(train_loss, 4),
+                    'Test Loss': round(test_loss, 4),
+                    'Val Loss': round(val_loss, 4),
+
+                    'Train Acc': round(train_acc, 4),
+                    'Test Acc': round(test_acc, 4),
+                    'Val Acc': round(val_acc, 4),
+
+                    'Train Precision': round(train_precision, 4),
+                    'Test Precision': round(test_precision, 4),
+                    'Val Precision': round(val_precision, 4),
+
+                    'Train Recall': round(train_recall, 4),
+                    'Test Recall': round(test_recall, 4),
+                    'Val Recall': round(val_recall, 4),
+
+                    'Train F1 Score': round(train_f1, 4),
+                    'Test F1 Score': round(test_f1, 4),
+                    'Val F1 Score': round(val_f1, 4),
+
+                    'Train ROC AUC': round(train_roc_auc, 4) if train_roc_auc is not None else None,
+                    'Test ROC AUC': round(test_roc_auc, 4) if test_roc_auc is not None else None,
+                    'Val ROC AUC': round(val_roc_auc, 4) if val_roc_auc is not None else None,
+
+                    'Train RMSE': round(train_rmse, 4),
+                    'Test RMSE': round(test_rmse, 4),
+                    'Val RMSE': round(val_rmse, 4)
+                }
+
+                overall_result_file = f'../Sample testing/Test 13/Batch {batch_size} model parameter testing.csv'
+                if not os.path.isfile(overall_result_file):
+                    pd.DataFrame([overall_result]).to_csv(overall_result_file, index=False)
+                else:
+                    pd.DataFrame([overall_result]).to_csv(overall_result_file, mode='a', index=False, header=False)
+                
+                
+                # model_save_path = f"../saved_models/Batch{batch_size}_LR{lr}_Optim{optimizer_name}.pth"
+                # torch.save(model.state_dict(), model_save_path)
+                # print(f"Model saved to {model_save_path}")
+

@@ -1,0 +1,27 @@
+#unfreeze last 4 layers:
+for name, param in clip_model.visual.named_parameters():
+    if "transformer.resblocks.8" in name or \
+       "transformer.resblocks.9" in name or \
+       "transformer.resblocks.10" in name or \
+       "transformer.resblocks.11" in name:
+        param.requires_grad = True
+    else:
+        param.requires_grad = False
+
+
+class CLIPSkinClassifier(nn.Module):
+    def __init__(self, clip_model, num_classes=3):
+        super(CLIPSkinClassifier, self).__init__()
+        self.encoder = clip_model.visual
+        self.classifier = nn.Sequential(
+            nn.Linear(self.encoder.output_dim, 128),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(128, num_classes)
+        )
+
+    def forward(self, x):
+        features = self.encoder(x)
+        logits = self.classifier(features)
+        return logits
+

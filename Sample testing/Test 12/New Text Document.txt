@@ -1,0 +1,24 @@
+class CLIPSkinClassifier(nn.Module)
+    def __init__(self, clip_model, num_classes=3)
+        super(CLIPSkinClassifier, self).__init__()
+        self.encoder = clip_model.visual
+        self.classifier = nn.Sequential(
+            nn.Linear(self.encoder.output_dim, 256),  # Larger hidden layer size
+            nn.BatchNorm1d(256),  # Add Batch Normalization
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),  # Add Batch Normalization
+            nn.ReLU(),
+            nn.Linear(128, num_classes)
+        )
+
+    def forward(self, x)
+        features = self.encoder(x)  # Extract features using CLIP model
+        features = features.view(features.size(0), -1)  # Flatten if needed
+        logits = self.classifier(features)  # Pass through classifier
+        return logits
+    
+#unfreze all layers
+for param in clip_model.visual.parameters():
+    param.requires_grad = True
