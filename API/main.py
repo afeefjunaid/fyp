@@ -112,11 +112,11 @@ app = FastAPI()
 
 # Constants matching training
 IMAGE_SIZE = 128
-CLASS_NAMES = ['dry', 'oily']
+CLASS_NAMES = ['dry', 'normal','oily']
 
 # Load model
 try:
-    MODEL = load_model(r"C:\Users\shazi\OneDrive\Desktop\VS Code\fyp\saved_models\model_fold_10.keras")
+    MODEL = load_model(r"C:\Users\shazi\OneDrive\Desktop\VS Code\AI_Project\saved_models\best_model.keras")
     logger.info("Model loaded successfully.")
 except Exception as e:
     logger.error(f"Failed to load model: {str(e)}")
