@@ -7,3 +7,4 @@ Pillow
 keras
 python-multipart
 tensorflow
+python-3.12.10
