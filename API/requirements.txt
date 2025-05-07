@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+requests
+numpy
+Pillow
+keras
+python-multipart
+tensorflow==2.18.0
