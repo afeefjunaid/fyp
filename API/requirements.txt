@@ -6,4 +6,4 @@ numpy
 Pillow
 keras
 python-multipart
-tensorflow==2.11.0
+tensorflow==2.18.0
