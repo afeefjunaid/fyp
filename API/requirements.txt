@@ -3,3 +3,7 @@ uvicorn
 pydantic
 requests
 numpy
+Pillow
+keras
+python-multipart
+tensorflow
