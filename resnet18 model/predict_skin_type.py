@@ -3,7 +3,7 @@ from torchvision import transforms, models
 from PIL import Image
 
 # Configs
-model_path = r"C:\Users\admin\Desktop\fyp\fyp\saved_models\best_model.pth"
+model_path = r"C:\Users\shazi\OneDrive\Desktop\VS Code\fyp\resnet18 model\best_model.pth"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class_names = ['dry', 'normal', 'oily']  # order from ImageFolder
 

@@ -1,0 +1,2 @@
+Batch Size,Test Loss,Test Acc,Test Precision,Test Recall,Test F1,Test ROC AUC,Test RMSE
+100,0.5228,0.841,0.8469,0.841,0.8418,0.8807,0.6828
